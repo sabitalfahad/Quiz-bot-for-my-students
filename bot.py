@@ -1,6 +1,5 @@
 # This bot allows users to choose a category and difficulty, then play a 10-question quiz.
 # I learned to use environment variables to hide my bot token when uploading to GitHub.
-from dotenv import load_dotenv
 import requests
 import html
 import random
@@ -12,10 +11,9 @@ from telegram.ext import (
 )
 
 # Instead of putting my token directly, I store it in an environment variable.
-# I created a file named .env with BOT_TOKEN=your_real_token and used python-dotenv to load it.
-load_dotenv()
 
-BOT_TOKEN = os.getenv('BOT_TOKEN')  # This keeps my token secret 💡
+BOT_TOKEN = os.environ['BOT_TOKEN']
+# This keeps my token secret 💡
 
 # These numbers help track what stage of the conversation we're in.
 SELECTING_CATEGORY, SELECTING_DIFFICULTY, QUIZ = range(3)
