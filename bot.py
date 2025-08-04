@@ -4,15 +4,19 @@ import requests
 import html
 import random
 import os  # I use this to get the token securely from environment variables
+from dotenv import load_dotenv  # Added to load .env file
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ContextTypes, ConversationHandler
 )
 
-# Instead of putting my token directly, I store it in an environment variable.
+load_dotenv()  # Load environment variables from .env
 
-BOT_TOKEN = os.environ['BOT_TOKEN']
+# Instead of putting my token directly, I store it in an environment variable.
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+if not BOT_TOKEN:
+    raise RuntimeError("Error: BOT_TOKEN environment variable not set. Please set it before running the bot.")
 # This keeps my token secret 💡
 
 # These numbers help track what stage of the conversation we're in.
