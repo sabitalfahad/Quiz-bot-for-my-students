@@ -6,6 +6,7 @@ import html
 import random
 import os
 import logging
+import asyncio
 from dotenv import load_dotenv
 
 import aiohttp
@@ -49,11 +50,6 @@ CATEGORIES = {
 
 
 async def fetch_questions_async(category_id: int, difficulty: str):
-    """
-    Asynchronously fetch 10 quiz questions from the Open Trivia Database API.
-    Returns a list of tuples: (question, correct_answer, options).
-    Uses aiohttp for non-blocking HTTP requests.
-    """
     url = f"https://opentdb.com/api.php?amount=10&category={category_id}&difficulty={difficulty}&type=multiple"
     async with aiohttp.ClientSession() as session:
         try:
@@ -70,17 +66,12 @@ async def fetch_questions_async(category_id: int, difficulty: str):
         correct = html.unescape(item['correct_answer'])
         options = [html.unescape(ans) for ans in item['incorrect_answers']]
         options.append(correct)
-        random.shuffle(options)  # Shuffle answer options
+        random.shuffle(options)
         questions.append((question, correct, options))
     return questions
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Entry point for /start command or new quiz start.
-    Sends welcome message with a "Start Quiz" button.
-    """
-    # Clear any ongoing quiz data for this user to reset quiz
     user_data_store.pop(update.effective_user.id, None)
 
     welcome_buttons = [[InlineKeyboardButton(text="🎮 Start Quiz!", callback_data="start_quiz")]]
@@ -103,9 +94,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Displays category options to the user after pressing "Start Quiz".
-    """
     query = update.callback_query
     buttons = [[InlineKeyboardButton(text=cat, callback_data=cat)] for cat in list(CATEGORIES.keys())[:10]]
     await query.answer()
@@ -117,9 +105,6 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Stores selected category and asks user to choose difficulty.
-    """
     query = update.callback_query
     category_name = query.data
 
@@ -141,12 +126,6 @@ async def category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def difficulty_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    When difficulty is selected:
-    - Fetch quiz questions asynchronously.
-    - Store quiz state for the user.
-    - Send the first question.
-    """
     query = update.callback_query
     difficulty = query.data
     user_id = query.from_user.id
@@ -156,7 +135,6 @@ async def difficulty_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer("Category not set. Please restart the quiz.")
         return ConversationHandler.END
 
-    # Show typing indicator while fetching questions
     await query.message.chat.send_action(action="typing")
 
     questions = await fetch_questions_async(category_id, difficulty)
@@ -164,7 +142,6 @@ async def difficulty_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer("Failed to fetch questions. Please try again later.")
         return ConversationHandler.END
 
-    # Initialize user quiz progress
     user_data_store[user_id] = {
         'questions': questions,
         'score': 0,
@@ -172,15 +149,17 @@ async def difficulty_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
     }
 
     await query.answer()
+    # Delete the difficulty selection message
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logging.warning(f"Failed to delete message: {e}")
+
     await send_question(update, context, user_id)
     return QUIZ
 
 
 async def send_question(update, context, user_id):
-    """
-    Sends a quiz question with multiple choice answers as inline buttons.
-    Uses short callback_data keys and maps them to actual answers.
-    """
     data = user_data_store[user_id]
     index = data['index']
     question, correct, options = data['questions'][index]
@@ -192,25 +171,19 @@ async def send_question(update, context, user_id):
         callback_map[callback_data] = option_text
         buttons.append([InlineKeyboardButton(text=option_text, callback_data=callback_data)])
 
-    # Save callback_map for answer validation
     user_data_store[user_id]['callback_map'] = callback_map
 
     markup = InlineKeyboardMarkup(buttons)
 
-    # Edit the existing message with the new question and answer buttons
-    await update.callback_query.edit_message_text(
+    chat_id = update.effective_chat.id
+    await context.bot.send_message(
+        chat_id=chat_id,
         text=f"❓ Question {index + 1}:\n{question}",
         reply_markup=markup
     )
 
 
 async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles user's answer selection:
-    - Checks correctness.
-    - Updates score.
-    - Moves to next question or finishes quiz.
-    """
     query = update.callback_query
     user_id = query.from_user.id
     selected_callback = query.data
@@ -219,48 +192,64 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     callback_map = data.get('callback_map', {})
     answer = callback_map.get(selected_callback)
     if answer is None:
-        # Invalid or expired selection
         await query.answer("Invalid selection, please try again.", show_alert=True)
         return QUIZ
 
-    question, correct, _ = data['questions'][data['index']]
+    question, correct, options = data['questions'][data['index']]
+
+    # Disable buttons on the original question message
+    buttons_disabled = [
+        [InlineKeyboardButton(text=opt, callback_data="disabled")] for opt in options
+    ]
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons_disabled))
+
+    feedback_lines = [f"❓ *Question:* {question}\n"]
 
     if answer == correct:
         data['score'] += 1
-        feedback = "✅ Correct!"
+        feedback_lines.append(f"✅ Your answer: *{answer}* (Correct!)")
     else:
-        feedback = f"❌ Wrong! Correct answer: {correct}"
+        feedback_lines.append(f"❌ Your answer: *{answer}* (Wrong!)")
+        feedback_lines.append(f"✅ Correct answer: *{correct}*")
+
+    feedback_text = "\n".join(feedback_lines)
+
+    # Send feedback as a new message so it stays visible
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=feedback_text,
+        parse_mode="Markdown"
+    )
+
+    # Delete the original question message (optional, for cleaner chat)
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logging.warning(f"Failed to delete message: {e}")
 
     data['index'] += 1
-    await query.answer()
-    await query.edit_message_text(text=feedback)
 
-    # If more questions remain, send next question
     if data['index'] < len(data['questions']):
         await send_question(update, context, user_id)
         return QUIZ
     else:
-        # Quiz finished, show final score and options
         score = data['score']
         total = len(data['questions'])
         buttons = [
             [InlineKeyboardButton("🔁 Play Again", callback_data="play_again")],
             [InlineKeyboardButton("❌ Exit", callback_data="exit")]
         ]
-        await query.message.reply_text(
-            f"🎉 Quiz Finished!\nYou scored {score}/{total}.\n\nWant to play again?",
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"🎉 Quiz Finished!\nYou scored {score}/{total}.\n\nWant to play again?",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
         return SELECTING_CATEGORY
 
 
 async def play_again(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles user decision to replay or exit after quiz completion.
-    """
     query = update.callback_query
     if query.data == "play_again":
-        # Clear previous quiz data to start fresh
         user_data_store.pop(query.from_user.id, None)
         return await start(update, context)
     else:
@@ -269,15 +258,11 @@ async def play_again(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles cancellation of the quiz by user.
-    """
     await update.message.reply_text("Quiz cancelled.")
     user_data_store.pop(update.effective_user.id, None)
     return ConversationHandler.END
 
 
-# Conversation handler with states and callback patterns
 conv_handler = ConversationHandler(
     entry_points=[
         CommandHandler('start', start),
@@ -307,7 +292,6 @@ if __name__ == '__main__':
     )
 
     async def setup_commands(app):
-        # Set Telegram bot command menu for better UX
         await app.bot.set_my_commands([
             BotCommand("start", "Start the quiz game! 🎮"),
         ])
@@ -315,10 +299,8 @@ if __name__ == '__main__':
             menu_button=MenuButton(type=MenuButton.COMMANDS)
         )
 
-    # Create application and add handler
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(setup_commands).build()
     app.add_handler(conv_handler)
 
     print("Bot is running...")
     app.run_polling()
-# Note: The bot will run indefinitely until stopped manually.
