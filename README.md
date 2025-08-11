@@ -37,7 +37,7 @@ OpenTDB API for question sourcing
 git clone https://github.com/sabitalfahad/Quiz-bot-for-my-students.git
 cd Quiz-bot-for-my-students
 pip install -r requirements.txt
-</pre>```
+</pre>
 
 Add your Telegram bot token to a .env file:
 <pre>ini
