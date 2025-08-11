@@ -33,18 +33,21 @@ OpenTDB API for question sourcing
 
 ## 🚀 Getting Started
 
-```bash
+<pre>```bash
 git clone https://github.com/sabitalfahad/Quiz-bot-for-my-students.git
 cd Quiz-bot-for-my-students
 pip install -r requirements.txt
+</pre>```
 
 Add your Telegram bot token to a .env file:
-```ini
+<pre>```ini
 TELEGRAM_BOT_TOKEN=your_token_here
+</pre>
 
 Run the bot:
-```bash
-python bot.py
+<pre>```bash
+python bot.py</pre>
+
 🌐 Deployment Options
 Run locally or deploy for free on:
 
