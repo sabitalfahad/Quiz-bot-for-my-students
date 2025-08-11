@@ -1,4 +1,5 @@
 🎓 Quiz Bot for My Students 🇧🇩
+
 An interactive and lightweight Telegram quiz bot designed to help students — especially in Bangladesh — practice and improve their knowledge through quick, engaging quizzes.
 Built with Python and powered by the OpenTDB API, the bot delivers trivia questions directly in Telegram with inline buttons, score tracking, and instant feedback.
 
